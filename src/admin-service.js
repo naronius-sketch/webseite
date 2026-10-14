@@ -4,6 +4,9 @@ import { safeContactEmail, validatePublicConfig } from './broker-model.js';
 
 export const PROPERTY_PHOTO_BUCKET = 'property-photos';
 export const MAX_PROPERTY_PHOTO_BYTES = 8 * 1024 * 1024;
+export const MIN_AGENT_PASSWORD_LENGTH = 12;
+export const MAX_AGENT_PASSWORD_LENGTH = 200;
+export const MAX_NEW_AGENT_PASSWORD_BYTES = 72;
 
 // One real auth client per connection avoids duplicated refresh timers when the panel reopens.
 // Anonymous readers use a separate, non-persistent client and cannot restore that session.
@@ -19,6 +22,13 @@ const messages = {
   VALIDATION: 'The catalogue contains invalid or private fields. Check the listing details before saving.',
   NETWORK: 'The website service could not complete this request. Please try again.',
   UPLOAD: 'Upload failed. Use a JPEG, PNG or WebP photo of at most 8 MB.',
+  PASSWORD_CURRENT: 'Check your current password and try again. It must be no longer than 200 characters.',
+  PASSWORD_WEAK: 'Use a stronger password with at least 12 characters. It cannot contain only spaces.',
+  PASSWORD_TOO_LONG: 'This password is too long. Use a shorter password, especially if it contains emoji or accented letters.',
+  PASSWORD_SAME: 'Choose a new password that is different from your current password.',
+  PASSWORD_REAUTH: 'Your current password could not be verified. Please try again.',
+  PASSWORD_UPDATE: 'The password change could not be confirmed. Try signing in with your new password before changing it again.',
+  PASSWORD_RATE_LIMIT: 'Too many password attempts. Please wait a few minutes before trying again.',
 };
 
 function failure(code) {
@@ -84,6 +94,23 @@ async function request(operation, fallback) {
     if (result?.error) throw serviceFailure(result.error, fallback);
     return result?.data;
   } catch (error) { throw serviceFailure(error, fallback); }
+}
+
+// Password verification errors must not use the ordinary 401 => signed-out mapping:
+// a mistyped current password does not invalidate the agent's existing session.
+async function passwordRequest(operation, fallback) {
+  const mapError = error => {
+    if (error?.status === 429 || ['over_request_rate_limit', 'rate_limit_exceeded'].includes(error?.code)) return failure('PASSWORD_RATE_LIMIT');
+    if (['invalid_credentials', 'invalid_password'].includes(error?.code)) return failure('PASSWORD_CURRENT');
+    if (error?.code === 'weak_password') return failure('PASSWORD_WEAK');
+    if (error?.code === 'same_password') return failure('PASSWORD_SAME');
+    if (['reauthentication_needed', 'reauthentication_not_valid'].includes(error?.code)) return failure('PASSWORD_REAUTH');
+    return failure(fallback);
+  };
+  let result;
+  try { result = await operation(); } catch (error) { throw mapError(error); }
+  if (result?.error) throw mapError(result.error);
+  return result?.data;
 }
 
 async function readPublished(client) {
@@ -152,6 +179,36 @@ export function createAdminService(config, options = {}) {
     },
     async signOut() { await request(() => client.auth.signOut()); },
     checkAdmin,
+    async changePassword(currentPassword, newPassword) {
+      if (typeof currentPassword !== 'string' || !currentPassword || currentPassword.length > MAX_AGENT_PASSWORD_LENGTH) throw failure('PASSWORD_CURRENT');
+      if (typeof newPassword !== 'string' || newPassword.length < MIN_AGENT_PASSWORD_LENGTH
+        || !newPassword.trim()) throw failure('PASSWORD_WEAK');
+      if (new TextEncoder().encode(newPassword).length > MAX_NEW_AGENT_PASSWORD_BYTES) throw failure('PASSWORD_TOO_LONG');
+      if (newPassword === currentPassword) throw failure('PASSWORD_SAME');
+
+      const original = await requireAdmin();
+      const originalId = original.user.id;
+      const email = safeContactEmail(original.user.email);
+      if (!email) throw failure('AUTH_REQUIRED');
+      const requireOriginalSession = async () => {
+        if ((await getSession())?.user?.id !== originalId) throw failure('AUTH_REQUIRED');
+      };
+      await requireOriginalSession();
+      const verified = await passwordRequest(() => client.auth.signInWithPassword({
+        email, password: currentPassword,
+      }), 'PASSWORD_REAUTH');
+      if (verified?.session?.user?.id !== originalId || verified?.user?.id !== originalId) throw failure('AUTH_REQUIRED');
+
+      const approved = await requireAdmin();
+      if (approved.user.id !== originalId) throw failure('AUTH_REQUIRED');
+      await requireOriginalSession();
+      const updated = await passwordRequest(() => client.auth.updateUser({
+        password: newPassword, current_password: currentPassword,
+      }), 'PASSWORD_UPDATE');
+      if (!updated?.user?.id) throw failure('PASSWORD_UPDATE');
+      if (updated.user.id !== originalId) throw failure('AUTH_REQUIRED');
+      await requireOriginalSession();
+    },
     async loadCatalogue() {
       await requireAdmin();
       return catalogueState(await request(() => client.rpc('site_catalogue_state')));

@@ -74,6 +74,12 @@ Commit the file to `main` and wait for **Deploy Wangechi Realty to GitHub Pages*
 
 These hosted checks are still required after the project is connected. Local SQL tests execute the real schema and row-level policies in PostgreSQL, but do not exercise Supabase's hosted authentication, Data API or Storage HTTP service.
 
+## Change the agent's password
+
+After signing in, open **Account**, enter the current password, and enter a new password twice. Choose a different password with at least 12 characters. Supabase limits new passwords to 72 UTF-8 bytes; emoji and accented letters can use more than one byte, so the form checks the encoded length before submitting. **Change password** confirms the current password with Supabase Auth before updating that same account. Property edits stay in the working draft; this action does not save or publish the catalogue. After success, use the new password the next time you sign in. Other devices may need to sign in again. Keep the password private; no password is needed in GitHub, SQL or this chat.
+
+The provider's own password policy also applies. A rejected password or failed request shows an error instead of a success message. A connection failure during the update can leave its outcome uncertain; the new password may already apply. If Supabase asks for a fresh sign-in, save or back up any property edits, sign out, and sign in again before retrying. Check the completed change with a private browser window using the new password. Do not deliberately change the business account during automated tests.
+
 ## Backups, revocation and account recovery
 
 Keep a downloaded public catalogue backup before major edits. A JSON export contains public business details and offers; photos remain separate storage files and need their own backup. Use the Supabase dashboard's database/storage export or backup features according to the chosen plan. Keep private tracker backups outside the public repository.
@@ -87,6 +93,6 @@ where user_id = 'REPLACE-WITH-THE-USER-UID'::uuid;
 
 The next protected request is denied even if that user still has an otherwise valid authentication session. Membership removal does not delete the person's photos or change published offers. Also remove the Supabase Auth user when the account should no longer exist, and revoke any separate GitHub or project-owner access as appropriate.
 
-The prepared website has password login, without an email recovery screen. If the agent loses access and cannot use a provider-supported password update, the owner can create a replacement confirmed account, approve its new UID, verify login, and then remove the old UID. Follow step 3 with the replacement account; do not change authentication password fields directly with SQL. Keep a trusted project owner who can perform this recovery. Additional project owners should be added deliberately because their dashboard access is broader than the website's listing-admin role.
+The website supports password changes after sign-in, without an email recovery screen. If the agent forgets the current password and cannot use a provider-supported password update, the owner can create a replacement confirmed account, approve its new UID, verify login, and then remove the old UID. Follow step 3 with the replacement account; do not change authentication password fields directly with SQL. Keep a trusted project owner who can perform this recovery. Additional project owners should be added deliberately because their dashboard access is broader than the website's listing-admin role.
 
 Official references: [API keys](https://supabase.com/docs/guides/getting-started/api-keys), [row-level security](https://supabase.com/docs/guides/database/postgres/row-level-security), [Storage access control](https://supabase.com/docs/guides/storage/security/access-control), and [Auth configuration](https://supabase.com/docs/guides/auth/general-configuration).

@@ -15,6 +15,8 @@ After the one-time backend setup:
 
 An account must be explicitly approved in the database. Signing in alone does not grant administration rights. Drafts and photo writes are protected by database row-level policies, and stale revisions are rejected to prevent one device overwriting another device's newer changes. Public configuration exports contain only business details and offers.
 
+In **Account**, signed-in agents can change their own password by confirming the current password and entering the new password twice. New passwords must have at least 12 characters. The change uses Supabase Auth and keeps the working property draft open. Use the new password for the next sign-in. Forgotten passwords still require help from the site owner; an email recovery screen is not included.
+
 Uploads are public marketing images immediately, including photos uploaded for a draft. The app does not overwrite or delete stored photos. Removing an image from a listing only changes the listing; check published references before removing files in the provider's dashboard.
 
 ## Public catalogue and enquiries

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createAdminService, createPublicCatalogueService, validatePropertyPhoto, MAX_PROPERTY_PHOTO_BYTES } from '../src/admin-service.js';
+import { createAdminService, createPublicCatalogueService, validatePropertyPhoto, MAX_PROPERTY_PHOTO_BYTES,
+  MIN_AGENT_PASSWORD_LENGTH, MAX_AGENT_PASSWORD_LENGTH, MAX_NEW_AGENT_PASSWORD_BYTES } from '../src/admin-service.js';
 import { validatePublicConfig } from '../src/broker-model.js';
 
 const config = { schemaVersion: 1, supabaseUrl: 'https://abcdefghijklmnopqrst.supabase.co',
@@ -13,12 +14,13 @@ const state = { draftConfig: catalogue, publishedConfig: catalogue, draftRevisio
 function fakeClient({ signedIn = true, approved = true, rpcError, publicError, publicConfig = catalogue } = {}) {
   const calls = [];
   let callback;
-  const session = signedIn ? { user: { id: uid } } : null;
+  const session = signedIn ? { user: { id: uid, email: 'agent@example.com' } } : null;
   const client = {
     auth: {
       getSession: async () => ({ data: { session }, error: null }),
       onAuthStateChange: cb => { callback = cb; return { data: { subscription: { unsubscribe: () => calls.push(['unsubscribe']) } } }; },
-      signInWithPassword: async input => { calls.push(['signIn', input]); return { data: { session }, error: null }; },
+      signInWithPassword: async input => { calls.push(['signIn', input]); return { data: { session, user: session?.user }, error: null }; },
+      updateUser: async input => { calls.push(['updateUser', input]); return { data: { user: session?.user }, error: null }; },
       signOut: async () => { calls.push(['signOut']); return { error: null }; },
     },
     rpc: async (name, args) => {
@@ -40,7 +42,7 @@ function fakeClient({ signedIn = true, approved = true, rpcError, publicError, p
       getPublicUrl: path => ({ data: { publicUrl: `${config.supabaseUrl}/storage/v1/object/public/${bucket}/${path}` } }),
     }) },
   };
-  return { client, calls, fireAuth: (...args) => callback?.(...args) };
+  return { client, calls, session, fireAuth: (...args) => callback?.(...args) };
 }
 
 test('public reader cannot persist or restore an admin session', async () => {
@@ -182,4 +184,138 @@ test('unapproved users cannot upload even valid photos', async () => {
   await assert.rejects(createAdminService(config, { client: fake.client }).uploadPhoto(
     new File([new Uint8Array([255, 216, 255, 1])], 'photo.jpg', { type: 'image/jpeg' })), { code: 'ADMIN_REQUIRED' });
   assert.equal(fake.calls.filter(call => call[0] === 'upload').length, 0);
+});
+
+const currentPassword = 'Current agent password!';
+const newPassword = 'A different agent password!';
+
+test('password changes reject invalid, short, whitespace-only and repeated values before authentication', async () => {
+  assert.equal(MIN_AGENT_PASSWORD_LENGTH, 12);
+  assert.equal(MAX_AGENT_PASSWORD_LENGTH, 200);
+  assert.equal(MAX_NEW_AGENT_PASSWORD_BYTES, 72);
+  const fake = fakeClient(); const service = createAdminService(config, { client: fake.client });
+  for (const current of [undefined, '', 'x'.repeat(201)]) {
+    await assert.rejects(service.changePassword(current, newPassword), { code: 'PASSWORD_CURRENT' });
+  }
+  for (const next of [undefined, '', 'x'.repeat(11), ' '.repeat(12), '\u00a0'.repeat(12)]) {
+    await assert.rejects(service.changePassword(currentPassword, next), { code: 'PASSWORD_WEAK' });
+  }
+  for (const next of ['x'.repeat(73), 'x'.repeat(201), '😀'.repeat(19), 'é'.repeat(37)]) {
+    await assert.rejects(service.changePassword(currentPassword, next), { code: 'PASSWORD_TOO_LONG' });
+  }
+  await assert.rejects(service.changePassword(currentPassword, currentPassword), { code: 'PASSWORD_SAME' });
+  assert.equal(fake.calls.length, 0);
+});
+
+test('new password length follows the hosted UTF-8 byte limit and permits legacy current passwords', async () => {
+  for (const next of ['x'.repeat(72), 'é'.repeat(12), '😀'.repeat(12)]) {
+    const fake = fakeClient();
+    await createAdminService(config, { client: fake.client }).changePassword('c'.repeat(200), next);
+    assert.deepEqual(fake.calls.find(call => call[0] === 'updateUser')[1], { password: next, current_password: 'c'.repeat(200) });
+  }
+});
+
+test('anonymous and unapproved accounts cannot verify or change passwords through the admin service', async () => {
+  for (const [signedIn, code] of [[false, 'AUTH_REQUIRED'], [true, 'ADMIN_REQUIRED']]) {
+    const fake = fakeClient({ signedIn, approved: false });
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), { code });
+    assert.equal(fake.calls.filter(call => ['signIn', 'updateUser'].includes(call[0])).length, 0);
+  }
+});
+
+test('password changes explicitly reauthenticate the existing email and recheck admin approval before updating', async () => {
+  const fake = fakeClient();
+  const result = await createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword);
+  assert.equal(result, undefined);
+  assert.deepEqual(fake.calls, [
+    ['site_admin_check', undefined],
+    ['signIn', { email: 'agent@example.com', password: currentPassword }],
+    ['site_admin_check', undefined],
+    ['updateUser', { password: newPassword, current_password: currentPassword }],
+  ]);
+  assert.ok(!fake.calls.some(call => call[0] === 'signOut'));
+});
+
+test('a wrong current password, including HTTP 401, never updates or reports session expiration', async () => {
+  for (const status of [400, 401]) {
+    const fake = fakeClient();
+    fake.client.auth.signInWithPassword = async () => ({ data: { session: null, user: null },
+      error: { code: 'invalid_credentials', status, message: `private detail ${currentPassword}` } });
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), error =>
+      error.code === 'PASSWORD_CURRENT' && !error.message.includes(currentPassword));
+    assert.equal(fake.calls.filter(call => call[0] === 'updateUser').length, 0);
+  }
+});
+
+test('password verification and update errors are sanitized and updates are not retried', async () => {
+  for (const [stage, serverError, code] of [
+    ['signInWithPassword', { status: 429 }, 'PASSWORD_RATE_LIMIT'],
+    ['signInWithPassword', { status: 503 }, 'PASSWORD_REAUTH'],
+    ['updateUser', { code: 'weak_password' }, 'PASSWORD_WEAK'],
+    ['updateUser', { code: 'same_password' }, 'PASSWORD_SAME'],
+    ['updateUser', { code: 'reauthentication_needed' }, 'PASSWORD_REAUTH'],
+    ['updateUser', { status: 429 }, 'PASSWORD_RATE_LIMIT'],
+    ['updateUser', { status: 500 }, 'PASSWORD_UPDATE'],
+  ]) {
+    const fake = fakeClient(); let requests = 0;
+    fake.client.auth[stage] = async () => {
+      requests++;
+      return { data: null, error: { ...serverError, message: `${currentPassword} ${newPassword} sensitive details` } };
+    };
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), error =>
+      error.code === code && !error.message.includes(currentPassword) && !error.message.includes(newPassword)
+      && !error.message.includes('sensitive details'));
+    assert.equal(requests, 1);
+  }
+  for (const [stage, code] of [['signInWithPassword', 'PASSWORD_REAUTH'], ['updateUser', 'PASSWORD_UPDATE']]) {
+    const fake = fakeClient();
+    fake.client.auth[stage] = async () => { throw new Error(`network leaked ${newPassword}`); };
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), error =>
+      error.code === code && !error.message.includes(newPassword));
+  }
+});
+
+test('reauthentication must return the original account in both user and session', async () => {
+  const otherId = '22222222-2222-4222-8222-222222222222';
+  for (const [userId, sessionId] of [[otherId, uid], [uid, otherId], [null, uid], [uid, null]]) {
+    const fake = fakeClient();
+    fake.client.auth.signInWithPassword = async () => ({ data: {
+      user: userId ? { id: userId } : null, session: sessionId ? { user: { id: sessionId } } : null,
+    }, error: null });
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), { code: 'AUTH_REQUIRED' });
+    assert.equal(fake.calls.filter(call => call[0] === 'updateUser').length, 0);
+  }
+});
+
+test('a cross-tab account switch or sign-out during reauthentication prevents the password update', async () => {
+  for (const changedSession of [null, { user: { id: '22222222-2222-4222-8222-222222222222', email: 'other@example.com' } }]) {
+    const fake = fakeClient(); let afterReauth = false;
+    fake.client.auth.getSession = async () => ({ data: { session: afterReauth ? changedSession : fake.session }, error: null });
+    fake.client.auth.signInWithPassword = async () => {
+      afterReauth = true;
+      return { data: { user: fake.session.user, session: fake.session }, error: null };
+    };
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), { code: 'AUTH_REQUIRED' });
+    assert.equal(fake.calls.filter(call => call[0] === 'updateUser').length, 0);
+  }
+});
+
+test('losing admin approval during reauthentication prevents the password update', async () => {
+  const fake = fakeClient(); let checks = 0;
+  fake.client.rpc = async name => ({ data: name === 'site_admin_check' ? ++checks === 1 : null, error: null });
+  await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), { code: 'ADMIN_REQUIRED' });
+  assert.equal(checks, 2);
+  assert.equal(fake.calls.filter(call => call[0] === 'updateUser').length, 0);
+});
+
+test('password updates require a valid same-account result and retain the original session identity', async () => {
+  for (const [user, code] of [[null, 'PASSWORD_UPDATE'], [{ id: '22222222-2222-4222-8222-222222222222' }, 'AUTH_REQUIRED']]) {
+    const fake = fakeClient();
+    fake.client.auth.updateUser = async () => ({ data: { user }, error: null });
+    await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), { code });
+  }
+  const fake = fakeClient(); let updated = false;
+  fake.client.auth.getSession = async () => ({ data: { session: updated ? null : fake.session }, error: null });
+  fake.client.auth.updateUser = async () => { updated = true; return { data: { user: fake.session.user }, error: null }; };
+  await assert.rejects(createAdminService(config, { client: fake.client }).changePassword(currentPassword, newPassword), { code: 'AUTH_REQUIRED' });
 });

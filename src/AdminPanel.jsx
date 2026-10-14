@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, ArrowUpFromLine, Check, ChevronRight, Cloud, Eye, Home, ImagePlus, LoaderCircle, LockKeyhole, LogOut, Plus, RefreshCw, Save, Settings, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowUpFromLine, Check, ChevronRight, Cloud, Eye, Home, ImagePlus, LoaderCircle, LockKeyhole, LogOut, Plus, RefreshCw, Save, Settings, ShieldCheck, Trash2, Upload, UserRound, X } from 'lucide-react';
 import { DEFAULT_BUSINESS, isPublicImageUrl, parsePublicConfig, validatePublicConfig } from './broker-model.js';
 import { loadBackendConfig } from './admin-config.js';
-import { createAdminService } from './admin-service.js';
+import { createAdminService, MIN_AGENT_PASSWORD_LENGTH, MAX_AGENT_PASSWORD_LENGTH, MAX_NEW_AGENT_PASSWORD_BYTES } from './admin-service.js';
 import './admin.css';
 
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -36,6 +36,19 @@ function errorMessage(problem, action = 'complete this request') {
   return `We could not ${action}. Check your connection and try again. Your changes have not been published.`;
 }
 
+function passwordError(problem) {
+  const messages = {
+    PASSWORD_CURRENT: 'Your current password could not be verified. Check it and try again.',
+    PASSWORD_WEAK: `This password does not meet your account’s requirements. Choose a stronger, unique password with at least ${MIN_AGENT_PASSWORD_LENGTH} characters.`,
+    PASSWORD_TOO_LONG: 'This password is too long. Use a shorter password, especially if it contains emoji or accented letters.',
+    PASSWORD_SAME: 'Choose a new password that is different from your current password.',
+    PASSWORD_REAUTH: 'Your current password could not be checked. Check your connection and try again. If the problem continues, save your draft and sign in again.',
+    PASSWORD_UPDATE: 'We could not confirm the password change. Check your connection. If you retry, you may need to use the new password.',
+    PASSWORD_RATE_LIMIT: 'Too many password requests. Please wait before trying again.',
+  };
+  return messages[problem?.code] || 'We could not confirm the password change. Check your connection. If you retry, you may need to use the new password.';
+}
+
 function Field({ label, hint, children }) {
   return <label className="admin-field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>;
 }
@@ -49,6 +62,7 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
   const [phase, setPhase] = useState('starting');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [accountPasswords, setAccountPasswords] = useState({ current: '', next: '', confirmation: '' });
   const [userEmail, setUserEmail] = useState('');
   const [working, setWorking] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
@@ -63,6 +77,7 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
   const dialog = useRef(null);
   const emailInput = useRef(null);
   const titleInput = useRef(null);
+  const currentPasswordInput = useRef(null);
   const importInput = useRef(null);
   const serviceRef = useRef(null);
   const mounted = useRef(false);
@@ -90,6 +105,7 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
     setUserEmail('');
     setConflict(false);
     setPassword('');
+    setAccountPasswords({ current: '', next: '', confirmation: '' });
     setMessage('');
     setErrors([]);
     setOperation('');
@@ -190,8 +206,10 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
   }, []);
   useEffect(() => {
     if (phase === 'login' && !busy) emailInput.current?.focus();
+    else if (phase === 'ready' && tab === 'account' && !busy) currentPasswordInput.current?.focus();
     else if (!dialog.current?.contains(document.activeElement)) dialog.current?.focus();
-  }, [phase, busy]);
+  }, [phase, busy, tab]);
+  useEffect(() => { if (tab !== 'account') setAccountPasswords({ current: '', next: '', confirmation: '' }); }, [tab]);
   useEffect(() => { if (listing) titleInput.current?.focus(); }, [listing?.id]);
   useEffect(() => {
     function beforeUnload(event) { if (dirty || listingDirty || busyRef.current) { event.preventDefault(); event.returnValue = ''; } }
@@ -207,7 +225,7 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
   function keydown(event) {
     if (event.key === 'Escape') { event.preventDefault(); close(); }
     if (event.key !== 'Tab') return;
-    const focusable = [...dialog.current.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(element => element.getClientRects().length > 0);
+    const focusable = [...dialog.current.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0);
     const first = focusable[0];
     const last = focusable.at(-1);
     if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
@@ -271,6 +289,42 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
     setErrors([errorMessage(problem, action)]);
   }
   function editConfig(next) { setWorking(next); setMessage(''); setErrors([]); }
+  function changeTab(nextTab) {
+    if (busyRef.current) return;
+    if (nextTab === 'business' && listing) { setErrors(['Finish or cancel the property form before opening business settings.']); return; }
+    setTab(nextTab);
+    setErrors([]);
+    setMessage('');
+  }
+  async function changePassword(event) {
+    event.preventDefault();
+    if (busyRef.current || phaseRef.current !== 'ready') return;
+    const { current: currentPassword, next: newPassword, confirmation } = accountPasswords;
+    const failures = [];
+    if (!currentPassword || currentPassword.length > MAX_AGENT_PASSWORD_LENGTH) failures.push(`Enter your current password (up to ${MAX_AGENT_PASSWORD_LENGTH} characters).`);
+    if (newPassword.length < MIN_AGENT_PASSWORD_LENGTH || !newPassword.trim()) failures.push(passwordError({ code: 'PASSWORD_WEAK' }));
+    if (new TextEncoder().encode(newPassword).length > MAX_NEW_AGENT_PASSWORD_BYTES) failures.push(passwordError({ code: 'PASSWORD_TOO_LONG' }));
+    if (newPassword !== confirmation) failures.push('The new passwords do not match. Enter the same new password in both fields.');
+    if (newPassword && newPassword === currentPassword) failures.push(passwordError({ code: 'PASSWORD_SAME' }));
+    setMessage('');
+    if (failures.length) { setErrors(failures); return; }
+    const ticket = authEpoch.current;
+    setOperation('password');
+    setErrors([]);
+    try {
+      await serviceRef.current.changePassword(currentPassword, newPassword);
+      if (!current(ticket)) return;
+      setAccountPasswords({ current: '', next: '', confirmation: '' });
+      setMessage('Password changed. Use your new password the next time you sign in.');
+    } catch (problem) {
+      if (!current(ticket)) return;
+      if (['AUTH_REQUIRED', 'ADMIN_REQUIRED'].includes(problem?.code)) operationError(problem, 'change your password');
+      else {
+        setAccountPasswords(value => ({ ...value, current: '' }));
+        setErrors([passwordError(problem)]);
+      }
+    } finally { if (current(ticket)) setOperation(''); }
+  }
   async function openLocal() {
     if (busyRef.current || !onOpenLocal) return;
     if ((dirty || listingDirty) && !window.confirm('Open the local workspace with unsaved changes? Save your shared draft first to keep them.')) return;
@@ -441,7 +495,7 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
   const business = working?.business;
   const policy = { ...DEFAULT_BUSINESS.viewingPolicy, ...business?.viewingPolicy };
   const editingExists = Boolean(listing && working?.properties.some(item => String(item.id) === String(listing.id)));
-  const status = locked ? (busy === 'upload' ? 'Uploading photo…' : busy === 'publish' ? 'Publishing website…' : busy === 'save' ? 'Saving shared draft…' : 'Please wait…') : dirty ? 'Changes to save' : unpublished ? 'Draft saved · not published' : 'Up to date';
+  const status = locked ? (busy === 'upload' ? 'Uploading photo…' : busy === 'publish' ? 'Publishing website…' : busy === 'save' ? 'Saving shared draft…' : busy === 'password' ? 'Changing password…' : 'Please wait…') : dirty ? 'Changes to save' : unpublished ? 'Draft saved · not published' : 'Up to date';
 
   return <div className="admin-overlay"><section className="admin-shell" role="dialog" aria-modal="true" aria-labelledby="admin-title" tabIndex={-1} ref={dialog} onKeyDown={keydown}>
     <header className="admin-header"><div className="admin-heading"><span className="admin-brand-icon"><Home size={23} /></span><div><span className="admin-eyebrow">WANGECHI REALTY</span><h2 id="admin-title">Agent workspace</h2></div></div><div className="admin-header-actions">{phase === 'ready' && <button className="admin-icon-button" onClick={reloadDraft} disabled={locked} aria-label="Refresh shared draft" title="Reload shared draft"><RefreshCw size={18} /></button>}{['ready', 'checking', 'access-error'].includes(phase) && <button className="admin-icon-button" onClick={signOut} disabled={locked && busy !== 'reload'} aria-label="Sign out" title="Sign out"><LogOut size={19} /></button>}<button className="admin-icon-button" onClick={close} disabled={locked} aria-label="Close agent workspace"><X size={23} /></button></div></header>
@@ -457,10 +511,10 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
       </>}
     </div></div> : <>
       <div className="admin-account-bar"><span><ShieldCheck size={15} />{userEmail}</span><span className={`admin-save-state ${dirty ? 'admin-save-state-dirty' : ''}`}>{locked ? <LoaderCircle size={15} className="admin-spin" /> : <Cloud size={15} />}{status}</span></div>
-      <nav className="admin-tabs" aria-label="Agent workspace sections"><button className={tab === 'listings' ? 'active' : ''} aria-current={tab === 'listings' ? 'page' : undefined} onClick={() => setTab('listings')} disabled={locked}><Home size={18} />Properties{working && <span>{working.properties.length}</span>}</button><button className={tab === 'business' ? 'active' : ''} aria-current={tab === 'business' ? 'page' : undefined} onClick={() => { if (listing) { setErrors(['Finish or cancel the property form before opening business settings.']); return; } setTab('business'); }} disabled={locked}><Settings size={18} />Business settings</button></nav>
+      <nav className="admin-tabs" aria-label="Agent workspace sections"><button className={tab === 'listings' ? 'active' : ''} aria-current={tab === 'listings' ? 'page' : undefined} onClick={() => changeTab('listings')} disabled={locked}><Home size={18} />Properties{working && <span>{working.properties.length}</span>}</button><button className={tab === 'business' ? 'active' : ''} aria-current={tab === 'business' ? 'page' : undefined} onClick={() => changeTab('business')} disabled={locked}><Settings size={18} />Business settings</button><button className={tab === 'account' ? 'active' : ''} aria-current={tab === 'account' ? 'page' : undefined} onClick={() => changeTab('account')} disabled={locked}><UserRound size={18} />Account</button></nav>
       <main className="admin-body"><Notice errors={errors} message={message} />
         {conflict && <div className="admin-conflict"><div><strong>Keep your changes before reloading.</strong><p>Download your version if you want to compare or reapply it later.</p></div><div className="admin-inline-actions"><button className="admin-secondary" disabled={locked || !working} onClick={() => download(working)}><ArrowDownToLine size={17} />Download my changes</button><button className="admin-primary" disabled={locked} onClick={reloadDraft}><RefreshCw size={17} />Reload shared draft</button></div></div>}
-        {!working ? <div className="admin-first-draft"><span className="admin-small-icon"><Home size={30} /></span><span className="admin-eyebrow">YOUR FIRST SHARED DRAFT</span><h3>Bring your properties together.</h3><p>Start with the catalogue currently on your website, or create a fresh collection. Nothing goes live until you publish.</p><div className="admin-inline-actions"><button className="admin-primary" disabled={locked} onClick={() => startDraft(true)}><ArrowUpFromLine size={17} />Start with current website</button><button className="admin-secondary" disabled={locked} onClick={() => startDraft(false)}><Plus size={17} />Start a fresh collection</button></div><button className="admin-text-button" disabled={locked} onClick={() => importInput.current?.click()}><ArrowUpFromLine size={15} />Import website backup</button></div> : <>
+        {tab === 'account' ? <section className="admin-account-section" aria-labelledby="admin-account-title"><div className="admin-section-heading"><div><span className="admin-eyebrow">YOUR AGENT ACCOUNT</span><h3 id="admin-account-title">Keep your account yours.</h3><p>Change the password for {userEmail}. Your property draft stays as it is.</p></div></div><form className="admin-password-card" onSubmit={changePassword}><div><span className="admin-small-icon"><LockKeyhole size={25} /></span><h4>Change password</h4><p>Use a unique password with at least {MIN_AGENT_PASSWORD_LENGTH} characters. You will stay signed in on this device. Other devices may need to sign in again.</p></div><fieldset disabled={locked}><input className="admin-password-username" type="email" value={userEmail} readOnly autoComplete="username" aria-label="Agent account email" tabIndex={-1} /><Field label="Current password"><input ref={currentPasswordInput} type="password" autoComplete="current-password" value={accountPasswords.current} maxLength={MAX_AGENT_PASSWORD_LENGTH} onChange={event => setAccountPasswords(value => ({ ...value, current: event.target.value }))} required /></Field><Field label="New password"><input type="password" autoComplete="new-password" value={accountPasswords.next} minLength={MIN_AGENT_PASSWORD_LENGTH} maxLength={MAX_NEW_AGENT_PASSWORD_BYTES} onChange={event => setAccountPasswords(value => ({ ...value, next: event.target.value }))} required /></Field><Field label="Confirm new password"><input type="password" autoComplete="new-password" value={accountPasswords.confirmation} minLength={MIN_AGENT_PASSWORD_LENGTH} maxLength={MAX_NEW_AGENT_PASSWORD_BYTES} onChange={event => setAccountPasswords(value => ({ ...value, confirmation: event.target.value }))} required /></Field><button className="admin-primary" type="submit">{busy === 'password' ? <LoaderCircle className="admin-spin" size={17} /> : <LockKeyhole size={17} />}{busy === 'password' ? 'Changing password…' : 'Change password'}</button></fieldset></form></section> : !working ? <div className="admin-first-draft"><span className="admin-small-icon"><Home size={30} /></span><span className="admin-eyebrow">YOUR FIRST SHARED DRAFT</span><h3>Bring your properties together.</h3><p>Start with the catalogue currently on your website, or create a fresh collection. Nothing goes live until you publish.</p><div className="admin-inline-actions"><button className="admin-primary" disabled={locked} onClick={() => startDraft(true)}><ArrowUpFromLine size={17} />Start with current website</button><button className="admin-secondary" disabled={locked} onClick={() => startDraft(false)}><Plus size={17} />Start a fresh collection</button></div><button className="admin-text-button" disabled={locked} onClick={() => importInput.current?.click()}><ArrowUpFromLine size={15} />Import website backup</button></div> : <>
           {tab === 'listings' && <><div className="admin-section-heading"><div><span className="admin-eyebrow">YOUR PROPERTY COLLECTION</span><h3>Make room for the next move.</h3><p>Update your listings here, then publish when everything is ready.</p></div><button className="admin-primary" disabled={locked} onClick={() => openListing()}><Plus size={18} />Add property</button></div>
             <div className={`admin-listing-layout ${listing ? 'has-editor' : ''}`}><div className="admin-property-grid">{working.properties.map(property => <article className="admin-property" key={property.id}><div className="admin-property-photo">{imageUrl(property.image) ? <img src={imageUrl(property.image)} alt="" loading="lazy" /> : <Home size={34} />}<span className={`admin-badge admin-badge-${property.status}`}>{property.status || 'available'}</span>{property.demo && <span className="admin-demo-badge">Demo</span>}</div><div className="admin-property-content"><span>{property.location} · {property.city}</span><h4>{property.title}</h4><p>KSh {amount(property.price)}{property.purpose === 'rent' && <small> / month</small>}</p><div className="admin-property-actions"><span>{property.purpose === 'rent' ? 'For rent' : 'For sale'}</span><button disabled={locked} onClick={() => openListing(property)}>Edit<ChevronRight size={16} /></button><button className="admin-icon-button admin-delete" disabled={locked} aria-label={`Remove ${property.title}`} onClick={() => removeListing(property)}><Trash2 size={16} /></button></div></div></article>)}{working.properties.length === 0 && <div className="admin-empty"><Home size={36} strokeWidth={1.2} /><h4>Your next listing starts here.</h4><p>Add a property with its price, availability and your own photos.</p><button className="admin-secondary" disabled={locked} onClick={() => openListing()}><Plus size={17} />Add your first property</button></div>}</div>
               {listing && <form className="admin-editor" onSubmit={saveListing}><div className="admin-editor-heading"><div><span className="admin-eyebrow">PROPERTY DETAILS</span><h4>{editingExists ? 'Edit property' : 'New property'}</h4></div><button type="button" className="admin-icon-button" disabled={locked} aria-label="Cancel property editing" onClick={cancelListing}><X size={20} /></button></div><fieldset disabled={locked}>
@@ -482,7 +536,7 @@ export default function AdminPanel({ initialConfig, onPreview, onPublished, onCl
         </>}
         <input ref={importInput} type="file" accept="application/json,.json" hidden onChange={importCatalogue} />
       </main>
-      {working && <footer className="admin-footer"><div className="admin-footer-note"><Cloud size={18} /><div><strong>{status}</strong><span>Saving keeps a shared draft. Publishing updates the public website.</span></div></div><div className="admin-footer-actions"><button className="admin-secondary" onClick={preview} disabled={locked || Boolean(listing)}><Eye size={17} />Preview</button><button className="admin-secondary" onClick={() => writeCatalogue('save')} disabled={locked || Boolean(listing) || conflict || !dirty}>{busy === 'save' ? <LoaderCircle className="admin-spin" size={17} /> : <Save size={17} />}Save draft</button><button className="admin-primary" onClick={() => writeCatalogue('publish')} disabled={locked || Boolean(listing) || conflict || !unpublished}>{busy === 'publish' ? <LoaderCircle className="admin-spin" size={17} /> : <Upload size={17} />}Publish website</button></div></footer>}
+      {working && tab !== 'account' && <footer className="admin-footer"><div className="admin-footer-note"><Cloud size={18} /><div><strong>{status}</strong><span>Saving keeps a shared draft. Publishing updates the public website.</span></div></div><div className="admin-footer-actions"><button className="admin-secondary" onClick={preview} disabled={locked || Boolean(listing)}><Eye size={17} />Preview</button><button className="admin-secondary" onClick={() => writeCatalogue('save')} disabled={locked || Boolean(listing) || conflict || !dirty}>{busy === 'save' ? <LoaderCircle className="admin-spin" size={17} /> : <Save size={17} />}Save draft</button><button className="admin-primary" onClick={() => writeCatalogue('publish')} disabled={locked || Boolean(listing) || conflict || !unpublished}>{busy === 'publish' ? <LoaderCircle className="admin-spin" size={17} /> : <Upload size={17} />}Publish website</button></div></footer>}
     </>}
   </section></div>;
 }
