@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUpRight, Bath, BedDouble, Check, ChevronDown, Heart, House, Leaf, MapPin, Menu, MoveUpRight, Search, ShieldCheck, SlidersHorizontal, Square, UsersRound, X } from 'lucide-react';
 import { locations as defaultLocations, categories, formatPrice, publicAsset } from './data.js';
 import { useSiteConfig } from './site-config.js';
-import Workspace from './Workspace.jsx';
+import { loadBackendConfig } from './admin-config.js';
 import ViewingRequest, { ContactSection } from './ViewingRequest.jsx';
 import OwnerEnquiry from './OwnerEnquiry.jsx';
 import './broker.css';
+
+const AdminPanel = lazy(() => import('./AdminPanel.jsx'));
+const Workspace = lazy(() => import('./Workspace.jsx'));
+const isAdminLocation = () => window.location.hash === '#admin' || /\/admin\/?$/.test(window.location.pathname);
 
 const initialFilters = { purpose: 'all', city: '', category: '', budget: '' };
 const readSaved = () => {
@@ -51,13 +55,41 @@ function PropertyCard({ property, saved, onSave, onOpen }) {
 }
 
 function PropertyDetails({ property, business, onClose, saved, onSave }) {
-  return <Modal title={property.title} onClose={onClose} className="property-modal"><img className="detail-image" src={property.image} alt={property.demo ? `Sample ${property.category.toLowerCase()} photograph` : property.title} /><div className="detail-content">{property.demo && <p className="sample-listing-notice">Sample listing · Photos and prices are illustrative. Contact the agent for current real offers.</p>}<div className="detail-heading"><div><span className="eyebrow">{property.category} · FOR {property.purpose === 'buy' ? 'SALE' : 'RENT'}</span><h2>{property.title}</h2><p className="property-location"><MapPin size={16} />{property.location}</p></div><button className={`save-button detail-save ${saved ? 'is-saved' : ''}`} aria-label={saved ? 'Unsave property' : 'Save property'} onClick={() => onSave(property.id)} aria-pressed={saved}><Heart size={20} fill={saved ? 'currentColor' : 'none'} /></button></div><p className="detail-price">{formatPrice(property)}</p><div className="detail-specs">{property.beds > 0 && <><span><BedDouble />{property.beds} bedrooms</span><span><Bath />{property.baths} bathrooms</span></>}<span><Square />{property.area.toLocaleString()} m²</span></div><p>{property.description}</p><div className="amenities">{property.amenities.map(amenity => <span key={amenity}><Check size={15} />{amenity}</span>)}</div><ViewingRequest property={property} business={business} /></div></Modal>;
+  const [selectedPhoto, setSelectedPhoto] = useState(property.image);
+  const photos = [...new Set([property.image, ...(property.photos || [])])];
+  useEffect(() => setSelectedPhoto(property.image), [property.id, property.image]);
+  return <Modal title={property.title} onClose={onClose} className="property-modal"><img className="detail-image" src={selectedPhoto} alt={property.demo ? `Sample ${property.category.toLowerCase()} photograph` : property.title} />{photos.length > 1 && <div className="detail-gallery" role="group" aria-label="Property photographs">{photos.map((photo, index) => <button key={photo} onClick={() => setSelectedPhoto(photo)} aria-label={`View photograph ${index + 1}`} aria-pressed={selectedPhoto === photo}><img src={photo} alt="" /></button>)}</div>}<div className="detail-content">{property.demo && <p className="sample-listing-notice">Sample listing · Photos and prices are illustrative. Contact the agent for current real offers.</p>}<div className="detail-heading"><div><span className="eyebrow">{property.category} · FOR {property.purpose === 'buy' ? 'SALE' : 'RENT'}</span><h2>{property.title}</h2><p className="property-location"><MapPin size={16} />{property.location}</p></div><button className={`save-button detail-save ${saved ? 'is-saved' : ''}`} aria-label={saved ? 'Unsave property' : 'Save property'} onClick={() => onSave(property.id)} aria-pressed={saved}><Heart size={20} fill={saved ? 'currentColor' : 'none'} /></button></div><p className="detail-price">{formatPrice(property)}</p><div className="detail-specs">{property.beds > 0 && <><span><BedDouble />{property.beds} bedrooms</span><span><Bath />{property.baths} bathrooms</span></>}<span><Square />{property.area.toLocaleString()} m²</span></div><p>{property.description}</p><div className="amenities">{property.amenities.map(amenity => <span key={amenity}><Check size={15} />{amenity}</span>)}</div><ViewingRequest property={property} business={business} /></div></Modal>;
 }
 
 export default function App() {
-  const { business, properties, rawConfig, loading, error: catalogueError, previewing, previewConfig, restorePublished } = useSiteConfig();
+  const { business, properties, rawConfig, loading, error: catalogueError, previewing, previewConfig, restorePublished, acceptPublished } = useSiteConfig();
   const locations = [...new Set([...defaultLocations, ...properties.map(property => property.city)])];
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(isAdminLocation);
+  useEffect(() => {
+    const changed = () => setAdminOpen(isAdminLocation());
+    window.addEventListener('hashchange', changed);
+    window.addEventListener('popstate', changed);
+    return () => { window.removeEventListener('hashchange', changed); window.removeEventListener('popstate', changed); };
+  }, []);
+  function openAdmin() { setAdminOpen(true); window.location.hash = 'admin'; }
+  function closeAdmin() {
+    setAdminOpen(false);
+    if (isAdminLocation()) {
+      const path = /\/admin\/?$/.test(window.location.pathname) ? import.meta.env.BASE_URL : window.location.pathname;
+      window.history.replaceState(null, '', path + window.location.search);
+    }
+  }
+  async function openLocalWorkspace() {
+    const backend = await loadBackendConfig();
+    if (backend.configured) {
+      const { createAdminService } = await import('./admin-service.js');
+      const service = createAdminService(backend);
+      if (!(await service.checkAdmin())) throw new Error('Sign in with an approved agent account to open local backups.');
+    }
+    setAdminOpen(false);
+    setWorkspaceOpen(true);
+  }
   const [includeUnavailable, setIncludeUnavailable] = useState(false);
   const savedCount = saved => saved.filter(id => properties.some(property => property.id === id)).length;
   useEffect(() => { document.title = `${business.name} — Homes for sale and rent in Kenya`; }, [business.name]);
@@ -119,9 +151,12 @@ export default function App() {
       <section className="listing-banner container"><div><span className="eyebrow">HAVE A PLACE SOMEONE WILL LOVE?</span><h2>Open the door to new possibilities.</h2><p>Talk to us about a marketing plan for your property.</p></div><button className="button button-light" onClick={() => setListProperty(true)}>Sell or let with us<ArrowUpRight size={18} /></button><House className="banner-house" strokeWidth={0.65} /></section>
       <ContactSection business={business} />
     </main>
-    <footer className="footer container"><div className="footer-top"><div><Logo name={business.name} /><p>Find your place.<br />Feel at home.</p></div><nav aria-label="Footer properties"><h3>Find a property</h3><button onClick={() => browse('buy')}>Homes for sale</button><button onClick={() => browse('rent')}>Homes for rent</button><button onClick={showSaved}>Your saved properties</button></nav><nav aria-label="Footer locations"><h3>Explore Kenya</h3>{locations.map(city => <button key={city} onClick={() => browse('all', city)}>{city}</button>)}</nav><div className="footer-note"><span className="kenya-dot" /><p>Made for life's<br />next adventure.</p><span>Karibu nyumbani. Welcome home.</span></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {business.name}. A little closer to home.</span><span>Sample properties are clearly marked</span><button className="workspace-footer-link" onClick={() => setWorkspaceOpen(true)}>Agent workspace</button><a href="#">Back to top<MoveUpRight size={13} /></a></div></footer>
+    <footer className="footer container"><div className="footer-top"><div><Logo name={business.name} /><p>Find your place.<br />Feel at home.</p></div><nav aria-label="Footer properties"><h3>Find a property</h3><button onClick={() => browse('buy')}>Homes for sale</button><button onClick={() => browse('rent')}>Homes for rent</button><button onClick={showSaved}>Your saved properties</button></nav><nav aria-label="Footer locations"><h3>Explore Kenya</h3>{locations.map(city => <button key={city} onClick={() => browse('all', city)}>{city}</button>)}</nav><div className="footer-note"><span className="kenya-dot" /><p>Made for life's<br />next adventure.</p><span>Karibu nyumbani. Welcome home.</span></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {business.name}. A little closer to home.</span><span>Sample properties are clearly marked</span><button className="workspace-footer-link" onClick={openAdmin}>Agent login</button><a href="#">Back to top<MoveUpRight size={13} /></a></div></footer>
     {activeProperty && <PropertyDetails property={activeProperty} business={business} onClose={closeProperty} saved={saved.includes(activeProperty.id)} onSave={toggleSaved} />}
     {listProperty && <Modal title="Property owner enquiry" onClose={closeListing}><OwnerEnquiry business={business} /></Modal>}
-    {workspaceOpen && <Workspace initialConfig={rawConfig} onPreview={value => { previewConfig(value); setActiveProperty(null); }} onClose={() => setWorkspaceOpen(false)} />}
+    {(adminOpen || workspaceOpen) && <Suspense fallback={<Modal title="Agent workspace" onClose={closeAdmin}><div className="detail-content"><p role="status">Opening the agent workspace…</p></div></Modal>}>
+      {adminOpen && <AdminPanel initialConfig={rawConfig} onPreview={value => { previewConfig(value); setActiveProperty(null); }} onPublished={value => { acceptPublished(value); setActiveProperty(null); }} onOpenLocal={openLocalWorkspace} onClose={closeAdmin} />}
+      {workspaceOpen && <Workspace initialConfig={rawConfig} onPreview={value => { previewConfig(value); setActiveProperty(null); }} onClose={() => { setWorkspaceOpen(false); openAdmin(); }} />}
+    </Suspense>}
   </>;
 }

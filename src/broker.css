@@ -21,3 +21,4 @@
 .property-tag:empty { display: none; }
 @media(max-width: 980px) { .brokerage-wordmark strong { font-size: 23px; } .brokerage-wordmark > span { font-size: 7px; } }
 @media(max-width: 760px) { .brokerage-wordmark strong { font-size: 25px; } .brokerage-wordmark > span { font-size: 8px; letter-spacing: 3px; } .workspace-preview-banner { gap: 7px; justify-content: flex-start; font-size: 11px; } .sample-property-tag { font-size: 7px; right: 10px; bottom: 11px; } .footer .brokerage-wordmark strong { font-size: 24px; } }
+.detail-gallery{display:flex;gap:10px;padding:12px 20px;background:#f5f4ee;overflow-x:auto}.detail-gallery button{flex:0 0 84px;height:64px;border:2px solid transparent;border-radius:7px;overflow:hidden;padding:0;background:none;cursor:pointer}.detail-gallery button[aria-pressed="true"]{border-color:#215844}.detail-gallery button:focus-visible{outline:3px solid #215844;outline-offset:2px}.detail-gallery img{width:100%;height:100%;object-fit:cover}

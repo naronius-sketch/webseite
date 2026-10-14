@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { properties as sampleProperties } from './data.js';
-import { DEFAULT_BUSINESS, parsePublicConfig, validatePublicConfig } from './broker-model.js';
+import { DEFAULT_BUSINESS, validatePublicConfig } from './broker-model.js';
+import { loadBackendConfig } from './admin-config.js';
+import { loadCatalogueSource } from './catalogue-source.js';
 
 const fallbackConfig = {
   schemaVersion: 1,
@@ -16,7 +17,7 @@ const fallbackConfig = {
       fixedAmount: 1000,
     },
   },
-  properties: sampleProperties.map(property => ({ ...property, status: 'available' })),
+  properties: [],
 };
 
 function resolveImage(path) {
@@ -36,16 +37,20 @@ export function useSiteConfig() {
     const controller = new AbortController();
     async function load() {
       try {
-        const response = await fetch(`${import.meta.env.BASE_URL}site-config.json`, {
-          cache: 'no-store', credentials: 'omit', signal: controller.signal,
+        const { config } = await loadCatalogueSource({
+          loadBackendConfig,
+          createCloudReader: async backend => {
+            const { createPublicCatalogueService } = await import('./admin-service.js');
+            return createPublicCatalogueService(backend);
+          },
+          base: import.meta.env.BASE_URL, signal: controller.signal,
         });
-        if (!response.ok) throw new Error('The published catalogue could not be loaded.');
-        const text = await response.text();
-        if (text.length > 2_000_000) throw new Error('The catalogue file is too large.');
-        const config = parsePublicConfig(text);
         if (!controller.signal.aborted) { setPublished(config); setError(''); }
       } catch (problem) {
-        if (problem.name !== 'AbortError') setError('We could not refresh the catalogue. The sample collection is displayed.');
+        if (!controller.signal.aborted && problem.name !== 'AbortError') {
+          setPublished(fallbackConfig);
+          setError('We could not load the current property collection. Please try again later or contact us for available homes.');
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -68,9 +73,17 @@ export function useSiteConfig() {
     setPreview(result.config);
   }
 
+  function acceptPublished(value) {
+    const result = validatePublicConfig(value);
+    if (!result.valid) throw new Error(result.errors.join(' '));
+    setPublished(result.config);
+    setPreview(null);
+    setError('');
+  }
+
   return {
     business: rawConfig.business, properties, rawConfig,
-    loading, error, previewing: Boolean(preview), previewConfig,
+    loading, error, previewing: Boolean(preview), previewConfig, acceptPublished,
     restorePublished: () => setPreview(null),
   };
 }
