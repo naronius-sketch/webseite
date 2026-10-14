@@ -4,6 +4,8 @@ An English-language Kenyan property website with a prepared shared agent admin. 
 
 The website is configured for the business-owned Supabase project. Public visitors read its published catalogue; approved agent accounts can use shared drafts, photo uploads and direct publication. The original `public/site-config.json` remains a starting catalogue and backup, with eight explicitly labelled sample listings. Follow [the complete admin setup](docs/admin-setup.md) for project setup, account approval and recovery.
 
+The business-supplied Wangechi Realty logo is preserved in `public/images/wangechi-realty-logo.jpg`. Shared branding displays the WR mark in navigation and the agent workspace, and the full name artwork in the footer. The slogan is also readable text: “Because ordinary isn’t your style”. Asset addresses follow the configured base path.
+
 ## Shared agent workflow
 
 After the one-time backend setup:

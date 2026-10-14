@@ -5,6 +5,7 @@ import { useSiteConfig } from './site-config.js';
 import { loadBackendConfig } from './admin-config.js';
 import ViewingRequest, { ContactSection } from './ViewingRequest.jsx';
 import OwnerEnquiry from './OwnerEnquiry.jsx';
+import Logo, { BRAND_TAGLINE } from './BrandLogo.jsx';
 import './broker.css';
 
 const AdminPanel = lazy(() => import('./AdminPanel.jsx'));
@@ -18,11 +19,6 @@ const readSaved = () => {
     return Array.isArray(value) ? value.filter(id => typeof id === 'string' || Number.isSafeInteger(id)) : [];
   } catch { return []; }
 };
-
-function Logo({ name = 'Wangechi Realty' }) {
-  const [first, ...rest] = name.split(' ');
-  return <a className="logo brokerage-logo" href="#" aria-label={`${name} home`}><span className="logo-mark"><House size={23} strokeWidth={1.7} /></span><span className="brokerage-wordmark"><strong>{first}</strong>{rest.length > 0 && <span>{rest.join(' ')}</span>}</span></a>;
-}
 
 function Modal({ title, onClose, children, className = '' }) {
   const panel = useRef(null);
@@ -123,7 +119,7 @@ export default function App() {
   const budgets = draft.purpose === 'buy' ? [[10000000, 'Up to KSh 10M'], [25000000, 'Up to KSh 25M'], [50000000, 'Up to KSh 50M'], [100000000, 'Up to KSh 100M']] : [[50000, 'Up to KSh 50,000'], [100000, 'Up to KSh 100,000'], [200000, 'Up to KSh 200,000'], [300000, 'Up to KSh 300,000']];
 
   return <>
-    <div className="announcement"><span>A place to belong. A life to love.</span><span className="announcement-right"><span className="kenya-dot" />Rooted in Kenya</span></div>
+    <div className="announcement"><span>{BRAND_TAGLINE}</span><span className="announcement-right"><span className="kenya-dot" />Rooted in Kenya</span></div>
     <header className="header"><div className="nav-container"><Logo name={business.name} /><nav className={menuOpen ? 'nav-links nav-open' : 'nav-links'} aria-label="Main navigation"><button onClick={() => browse('buy')}>Buy a home</button><button onClick={() => browse('rent')}>Rent a home</button><div className="explore-wrap"><button onClick={() => setExploreOpen(!exploreOpen)} aria-expanded={exploreOpen}>Explore locations<ChevronDown size={13} /></button>{exploreOpen && <div className="explore-menu">{locations.map(city => <button key={city} onClick={() => browse('all', city)}><MapPin size={14} />{city}</button>)}</div>}</div><a href="#about" onClick={() => setMenuOpen(false)}>About us</a></nav><div className="nav-actions"><button className="saved-nav" onClick={showSaved} aria-label={`Saved properties, ${savedCount(saved)}`}><Heart size={19} strokeWidth={1.6} /><span>Saved{savedCount(saved) > 0 && <span className="saved-count">{savedCount(saved)}</span>}</span></button><button className="button button-outline list-button" onClick={() => setListProperty(true)}>Sell or let with us<ArrowUpRight size={16} /></button><button className="mobile-menu icon-button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button></div></div></header>
     <main>
       {previewing && <div className="workspace-preview-banner" role="status"><span>Workspace preview · These changes are visible only on this device.</span><button onClick={() => { restorePublished(); setActiveProperty(null); }}>Return to published website</button></div>}
@@ -151,7 +147,7 @@ export default function App() {
       <section className="listing-banner container"><div><span className="eyebrow">HAVE A PLACE SOMEONE WILL LOVE?</span><h2>Open the door to new possibilities.</h2><p>Talk to us about a marketing plan for your property.</p></div><button className="button button-light" onClick={() => setListProperty(true)}>Sell or let with us<ArrowUpRight size={18} /></button><House className="banner-house" strokeWidth={0.65} /></section>
       <ContactSection business={business} />
     </main>
-    <footer className="footer container"><div className="footer-top"><div><Logo name={business.name} /><p>Find your place.<br />Feel at home.</p></div><nav aria-label="Footer properties"><h3>Find a property</h3><button onClick={() => browse('buy')}>Homes for sale</button><button onClick={() => browse('rent')}>Homes for rent</button><button onClick={showSaved}>Your saved properties</button></nav><nav aria-label="Footer locations"><h3>Explore Kenya</h3>{locations.map(city => <button key={city} onClick={() => browse('all', city)}>{city}</button>)}</nav><div className="footer-note"><span className="kenya-dot" /><p>Made for life's<br />next adventure.</p><span>Karibu nyumbani. Welcome home.</span></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {business.name}. A little closer to home.</span><span>Sample properties are clearly marked</span><button className="workspace-footer-link" onClick={openAdmin}>Agent login</button><a href="#">Back to top<MoveUpRight size={13} /></a></div></footer>
+    <footer className="footer container"><div className="footer-top"><div className="footer-brand"><Logo name={business.name} variant="full" /><p className="wangechi-tagline">{BRAND_TAGLINE}</p></div><nav aria-label="Footer properties"><h3>Find a property</h3><button onClick={() => browse('buy')}>Homes for sale</button><button onClick={() => browse('rent')}>Homes for rent</button><button onClick={showSaved}>Your saved properties</button></nav><nav aria-label="Footer locations"><h3>Explore Kenya</h3>{locations.map(city => <button key={city} onClick={() => browse('all', city)}>{city}</button>)}</nav><div className="footer-note"><span className="kenya-dot" /><p>Made for life's<br />next adventure.</p><span>Karibu nyumbani. Welcome home.</span></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {business.name}. A little closer to home.</span><span>Sample properties are clearly marked</span><button className="workspace-footer-link" onClick={openAdmin}>Agent login</button><a href="#">Back to top<MoveUpRight size={13} /></a></div></footer>
     {activeProperty && <PropertyDetails property={activeProperty} business={business} onClose={closeProperty} saved={saved.includes(activeProperty.id)} onSave={toggleSaved} />}
     {listProperty && <Modal title="Property owner enquiry" onClose={closeListing}><OwnerEnquiry business={business} /></Modal>}
     {(adminOpen || workspaceOpen) && <Suspense fallback={<Modal title="Agent workspace" onClose={closeAdmin}><div className="detail-content"><p role="status">Opening the agent workspace…</p></div></Modal>}>

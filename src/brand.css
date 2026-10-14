@@ -1,0 +1,17 @@
+.wangechi-brand{display:inline-flex;align-items:center;gap:10px;flex-shrink:0;color:#242323;line-height:1;text-decoration:none}
+.wangechi-art{display:block;position:relative;overflow:hidden;flex-shrink:0;mix-blend-mode:darken}
+.wangechi-art>img{position:absolute;display:block;max-width:none;height:auto;object-fit:contain;pointer-events:none}
+.wangechi-art-mark{width:64px;aspect-ratio:660 / 430}
+.wangechi-art-mark>img{width:193.9394%;left:-53.0303%;top:-58.1395%}
+.wangechi-art-full{width:260px;max-width:100%;aspect-ratio:1080 / 700}
+.wangechi-art-full>img{width:118.5185%;left:-9.2593%;top:-35.7143%}
+.wangechi-wordmark{display:flex;flex-direction:column;gap:7px}
+.wangechi-wordmark strong{font-family:Georgia,'Times New Roman',serif;font-size:25px;letter-spacing:1.7px;font-weight:400;text-transform:uppercase}
+.wangechi-wordmark>span{font-size:9px;font-weight:650;letter-spacing:5px;text-transform:uppercase;color:#9b792b}
+.footer-brand{min-width:0}
+.wangechi-brand-full{width:260px;max-width:100%}
+.footer-brand .wangechi-tagline{font-family:Georgia,'Times New Roman',serif;font-size:17px;font-style:italic;line-height:1.55;color:#5c574b;margin-top:14px;max-width:290px}
+.admin-brand-logo{width:58px}
+@media(max-width:1100px){.wangechi-art-mark{width:54px}.wangechi-wordmark strong{font-size:23px;letter-spacing:1.2px}}
+@media(max-width:760px){.wangechi-brand{gap:8px}.wangechi-art-mark{width:50px}.wangechi-wordmark strong{font-size:23px;letter-spacing:1px}.wangechi-wordmark>span{font-size:8px;letter-spacing:4px}.footer-brand{grid-column:1 / -1}.wangechi-brand-full{width:235px}.footer-brand .wangechi-tagline{font-size:16px;max-width:none}.admin-brand-logo{width:44px}}
+@media(max-width:380px){.wangechi-art-mark{width:44px}.wangechi-wordmark strong{font-size:21px}.wangechi-wordmark>span{font-size:7px;letter-spacing:3.5px}.header .saved-nav>span{font-size:0;gap:0}.header .saved-nav .saved-count{font-size:9px}.admin-brand-logo{width:40px}}
