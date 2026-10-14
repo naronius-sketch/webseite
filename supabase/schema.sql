@@ -311,8 +311,8 @@ insert into storage.buckets(id, name, public, file_size_limit, allowed_mime_type
 values ('property-photos', 'property-photos', true, 8388608, array['image/jpeg','image/png','image/webp'])
 on conflict (id) do update set public = excluded.public,
   file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
-alter table storage.objects enable row level security;
-grant select, insert on storage.objects to authenticated;
+-- Supabase manages Storage's RLS and table grants. The SQL editor can manage
+-- policies through supautils.policy_grants, but cannot ALTER this managed table.
 
 drop policy if exists site_admin_photo_insert on storage.objects;
 create policy site_admin_photo_insert on storage.objects for insert to authenticated with check (

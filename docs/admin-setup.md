@@ -16,6 +16,8 @@ Nothing in the website creates a project or purchases a plan automatically.
 
 In the project's **SQL Editor**, open a new query, copy the complete contents of [supabase/schema.sql](../supabase/schema.sql), and run it. Then run [supabase/seed.sql](../supabase/seed.sql) in a second query.
 
+Supabase already manages row-level security and table grants for `storage.objects`. The schema adds the application's Storage policies through the [supported SQL-editor policy permissions](https://github.com/supabase/supautils#manage-policies); it does not alter that provider-owned table or change its owner. If an older copy failed with `must be owner of table objects`, start a new query and run the complete current file. The script uses one transaction, so the failed installation must not be resumed from its last line. A previous aborted transaction may need `ROLLBACK;` before retrying.
+
 The schema creates:
 
 - `public.site_admins`: the approved account IDs. Website accounts cannot add themselves.

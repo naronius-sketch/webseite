@@ -50,6 +50,22 @@ const bootstrap = `
   -- Match existing Supabase projects that grant broad privileges to newly
   -- created public tables. The actual migration must remove these grants.
   alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  -- Model the hosted restriction observed in the SQL editor: Storage already
+  -- has RLS and grants, and application setup must not ALTER its managed table.
+  -- This guard models the restriction, not Supabase's internal implementation.
+  create function storage.test_protect_managed_table() returns event_trigger
+    language plpgsql as $$
+    declare command record;
+    begin
+      for command in select * from pg_event_trigger_ddl_commands() loop
+        if command.object_identity = 'storage.objects' then
+          raise exception using errcode = '42501', message = 'must be owner of table objects';
+        end if;
+      end loop;
+    end
+    $$;
+  create event trigger test_protect_managed_storage on ddl_command_end
+    when tag in ('ALTER TABLE') execute function storage.test_protect_managed_table();
 `;
 
 before(async () => {
@@ -91,6 +107,14 @@ const clone = value => structuredClone(value);
 const expectSqlError = (promise, codes) => assert.rejects(promise, error => {
   assert.ok(codes.includes(error.code), `Expected SQLSTATE ${codes.join(' or ')}, received ${error.code}: ${error.message}`);
   return true;
+});
+
+test('setup preserves provider-managed Storage RLS and installs policies without altering its table', async () => {
+  const result = await db.query("select relrowsecurity from pg_class where oid = 'storage.objects'::regclass");
+  assert.equal(result.rows[0].relrowsecurity, true);
+  await expectSqlError(db.exec('alter table storage.objects enable row level security'), ['42501']);
+  const policies = await db.query("select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects'");
+  assert.ok(policies.rows.some(row => row.policyname === 'site_admin_photo_insert'));
 });
 
 async function cannotRead(role, userId, table) {
