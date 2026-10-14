@@ -67,6 +67,33 @@ GITHUB_PAGES=true npm run build
 GITHUB_PAGES=true npm run preview -- --port 4173 --strictPort
 ```
 
-The Pages base path is `/webseite/`. CSS, scripts, favicon, catalogue, fonts and images use that prefix. The workflow `.github/workflows/deploy-pages.yml` publishes commits pushed to `main` or a manual workflow dispatch.
+The local Pages default is `/webseite/`. The workflow reads the actual path from `actions/configure-pages` and passes it as `PAGES_BASE_PATH`, including the trailing slash. On the current GitHub address this is `/webseite/`; with a custom domain it becomes `/`. CSS, scripts, favicon, catalogue, fonts and images follow that path. The workflow `.github/workflows/deploy-pages.yml` publishes commits pushed to `main` or a manual workflow dispatch.
+
+To test the custom-domain build locally:
+
+```bash
+GITHUB_PAGES=true PAGES_BASE_PATH=/ npm run build
+GITHUB_PAGES=true PAGES_BASE_PATH=/ npm run preview -- --port 4173 --strictPort
+```
+
+## Own domain
+
+The requested domain is `wangechirealty.com`. The owner has not yet purchased it; availability has not been checked, and it is not connected to the site. The existing public GitHub address remains active.
+
+After registering the domain, set it under **Repository → Settings → Pages → Custom domain** and save it before changing DNS. With this Actions deployment, a repository `CNAME` file does not configure the domain. Domain verification under the account's Pages settings is recommended; use the TXT value supplied by GitHub.
+
+At the domain provider, point the apex (`@`) to GitHub Pages with four A records:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| A | @ | 185.199.108.153 |
+| A | @ | 185.199.109.153 |
+| A | @ | 185.199.110.153 |
+| A | @ | 185.199.111.153 |
+| CNAME | www | naronius-sketch.github.io |
+
+Replace conflicting records for those website hostnames; preserve unrelated email records. After GitHub's DNS check and certificate provisioning succeed, enable **Enforce HTTPS**. DNS propagation and HTTPS availability can take up to 24 hours. Run the deployment workflow again after saving the domain so it builds with the new root path.
+
+See GitHub's [custom-domain instructions](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site) and [domain-verification instructions](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/verifying-your-custom-domain-for-github-pages).
 
 See `IMAGE_SOURCES.md` for the illustrative photographs used in sample listings.
