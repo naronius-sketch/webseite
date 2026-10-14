@@ -29,6 +29,8 @@ jobs:
         run: npm ci
       - name: Validate public catalogue and broker rules
         run: npm test
+      - name: Check connected public backend and anonymous permissions
+        run: npm run check:backend
       - name: Configure GitHub Pages
         id: pages
         uses: actions/configure-pages@v5

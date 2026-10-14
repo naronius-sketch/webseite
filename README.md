@@ -2,7 +2,7 @@
 
 An English-language Kenyan property website with a prepared shared agent admin. The public website is **https://wangechirealty.com/**; the agent entry is **https://wangechirealty.com/admin/**.
 
-The Supabase connection is currently empty. The public website continues to use `public/site-config.json`, with eight explicitly labelled sample listings. Approved-account login, shared drafts, photo uploads and direct publication become available after the business creates and connects its own Supabase project. Follow [the complete admin setup](docs/admin-setup.md).
+The website is configured for the business-owned Supabase project. Public visitors read its published catalogue; approved agent accounts can use shared drafts, photo uploads and direct publication. The original `public/site-config.json` remains a starting catalogue and backup, with eight explicitly labelled sample listings. Follow [the complete admin setup](docs/admin-setup.md) for project setup, account approval and recovery.
 
 ## Shared agent workflow
 
@@ -44,7 +44,9 @@ npm test
 npm run dev -- --port 5173 --strictPort
 ```
 
-The test suite includes actual PostgreSQL execution through PGlite for the schema, row-level policies, publication transactions, stale revision rejection and storage permissions. Supabase auth/storage schema fixtures model the required interfaces. Service transport tests and browser mocks exercise the prepared client. Hosted account login, API and real storage checks still need the business-owned project.
+The test suite includes actual PostgreSQL execution through PGlite for the schema, row-level policies, publication transactions, stale revision rejection and storage permissions. Supabase auth/storage schema fixtures model the required interfaces. Service transport tests and browser mocks exercise the prepared client. These local tests do not verify hosted account login or real Storage HTTP uploads; those need a separate check on the business-owned project.
+
+Before deployment, CI also runs `npm run check:backend`. With a configured connection, this read-only check requires a valid live public catalogue and confirms anonymous visitors cannot read drafts or administration data. It uses only the public publishable key. A failed check prevents the new frontend configuration from being deployed. Approved-agent password login and real photo uploads still need to be checked on the agent's own device.
 
 ```bash
 npm run build
